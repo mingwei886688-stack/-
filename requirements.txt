@@ -1,4 +1,7 @@
-# 桌面 UI 框架
+# Web 框架
+flask>=3.0
+
+# 桌面 UI 框架（原 PySide6 桌面版保留）
 PySide6>=6.7
 
 # PDF 处理

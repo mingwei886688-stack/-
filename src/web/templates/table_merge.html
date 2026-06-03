@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}表格合并{% endblock %}
+{% block content %}
+<h1>📊 表格合并</h1>
+<p class="subtitle">勾选要合并的 Sheet，垂直追加或水平拼接</p>
+
+<div id="dropzone" class="dropzone">
+  <div class="icon">📊</div>
+  <div class="label">拖拽表格文件到此处</div>
+  <div class="hint">支持 .xlsx / .xls / .csv（可多选）</div>
+</div>
+<input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple style="display:none">
+
+<div class="card">
+  <h3>选择要合并的 Sheet</h3>
+  <div class="check-list" id="sheetCheckList"></div>
+  <div class="toolbar" style="margin-top:12px">
+    <button class="btn btn-sm" onclick="toggleAll(true)">☑ 全选</button>
+    <button class="btn btn-sm" onclick="toggleAll(false)">☐ 取消全选</button>
+    <button class="btn btn-sm" onclick="removeChecked()">🗑 移除已选</button>
+    <button class="btn btn-danger btn-sm" onclick="clearAll()">✕ 清空</button>
+  </div>
+</div>
+
+<div class="card">
+  <h3>合并模式</h3>
+  <label style="display:block;margin-bottom:6px"><input type="radio" name="mode" value="vertical" checked> 垂直合并（追加行）— 相同列名对齐后纵向拼接</label>
+  <label><input type="radio" name="mode" value="horizontal"> 水平合并（追加列）— 按行索引横向拼接</label>
+</div>
+
+<div id="infoBar" class="status">已选: 0 个 Sheet · 合计: 0 行</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" id="previewBtn" disabled onclick="doPreview()">👁 预览</button>
+  <button class="btn btn-primary" id="exportBtn" disabled onclick="doExport('xlsx')">📤 导出 Excel</button>
+  <button class="btn" id="exportCsvBtn" disabled onclick="doExport('csv')">📤 导出 CSV</button>
+</div>
+
+<div class="card hidden" id="previewCard" style="margin-top:16px">
+  <h3>预览（前100行）<span id="previewInfo" style="font-weight:400;font-size:12px;color:var(--sub)"></span></h3>
+  <div class="table-wrap"><table class="data-table" id="previewTable"></table></div>
+</div>
+
+<div id="status" class="status"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allSheets = [];
+
+const dz = document.getElementById('dropzone');
+const fi = document.getElementById('fileInput');
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', () => upload(fi.files));
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); upload(e.dataTransfer.files); });
+
+async function upload(fileList) {
+  const form = new FormData();
+  for (let f of fileList) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (['xlsx','xls','csv'].includes(ext)) form.append('files', f);
+  }
+  if (!form.has('files')) return;
+  document.getElementById('status').textContent = '⏳ 上传中...';
+  const r = await fetch('/api/table/merge/upload', {method:'POST',body:form});
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('status').textContent = `✅ 已添加 ${d.total} 个 Sheet`;
+    renderSheets(d.sheets);
+  } else {
+    document.getElementById('status').textContent = '❌ ' + d.error;
+  }
+}
+
+function renderSheets(sheets) {
+  allSheets = sheets;
+  const el = document.getElementById('sheetCheckList');
+  el.innerHTML = sheets.map(s => `
+    <label><input type="checkbox" data-key="${s.key}" onchange="updateInfo()">
+      ${s.file} → ${s.sheet} <span style="color:var(--sub);font-size:11px">(${s.rows}行×${s.cols}列)</span>
+    </label>
+  `).join('');
+  updateInfo();
+}
+
+function getChecked() {
+  return [...document.querySelectorAll('#sheetCheckList input:checked')].map(c => c.dataset.key);
+}
+
+function updateInfo() {
+  const keys = getChecked();
+  let rows = 0;
+  keys.forEach(k => {
+    const s = allSheets.find(sh => sh.key === k);
+    if (s) rows += s.rows;
+  });
+  document.getElementById('infoBar').textContent = `已选: ${keys.length} 个 Sheet · 合计: ${rows} 行`;
+  const can = keys.length >= 2;
+  document.getElementById('previewBtn').disabled = !can;
+  document.getElementById('exportBtn').disabled = !can;
+  document.getElementById('exportCsvBtn').disabled = !can;
+}
+
+function toggleAll(v) {
+  document.querySelectorAll('#sheetCheckList input').forEach(c => c.checked = v);
+  updateInfo();
+}
+
+async function removeChecked() {
+  const keys = getChecked();
+  for (const k of keys) await fetch(`/api/table/merge/remove/${encodeURIComponent(k)}`, {method:'DELETE'});
+  const r = await fetch('/api/table/merge/sheets');
+  const d = await r.json();
+  renderSheets(d.sheets);
+}
+
+async function clearAll() {
+  await fetch('/api/table/merge/clear', {method:'POST'});
+  allSheets = [];
+  document.getElementById('sheetCheckList').innerHTML = '';
+  document.getElementById('previewCard').classList.add('hidden');
+  updateInfo();
+}
+
+async function doPreview() {
+  const form = { keys: getChecked(), mode: document.querySelector('input[name="mode"]:checked').value };
+  const r = await fetch('/api/table/merge/preview', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)});
+  const d = await r.json();
+  if (d.ok) renderPreview(d.preview);
+  else document.getElementById('status').textContent = '❌ ' + d.error;
+}
+
+function renderPreview(p) {
+  const card = document.getElementById('previewCard');
+  card.classList.remove('hidden');
+  document.getElementById('previewInfo').textContent = `(${p.total_rows} 行 × ${p.total_cols} 列)`;
+  const t = document.getElementById('previewTable');
+  t.innerHTML = '<thead><tr>' + p.columns.map(c => `<th>${c}</th>`).join('') + '</tr></thead>'
+    + '<tbody>' + p.rows.map(r => '<tr>' + r.map(v => `<td>${v}</td>`).join('') + '</tr>').join('') + '</tbody>';
+}
+
+async function doExport(fmt) {
+  const form = { keys: getChecked(), mode: document.querySelector('input[name="mode"]:checked').value, format: fmt };
+  const r = await fetch('/api/table/merge/export', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)});
+  if (r.ok) {
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = fmt==='xlsx'?'合并表格.xlsx':'合并表格.csv';
+    a.click(); URL.revokeObjectURL(url);
+  }
+}
+</script>
+{% endblock %}

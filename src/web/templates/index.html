@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}首页{% endblock %}
+{% block content %}
+<h1>📦 文件大助</h1>
+<p class="subtitle">桌面办公工具箱 · 本地运行，数据不上传</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px;">
+  <div class="card" style="cursor:pointer" onclick="location.href='/pdf-merge'">
+    <h3>📄 PDF 合并</h3>
+    <p style="font-size:13px;color:var(--sub)">多文件拖拽排序，一键合并</p>
+  </div>
+  <div class="card" style="cursor:pointer" onclick="location.href='/pdf-edit'">
+    <h3>✏️ PDF 编辑</h3>
+    <p style="font-size:13px;color:var(--sub)">缩略图预览，删除/旋转/提取/批注</p>
+  </div>
+  <div class="card" style="cursor:pointer" onclick="location.href='/table-merge'">
+    <h3>📊 表格合并</h3>
+    <p style="font-size:13px;color:var(--sub)">多Sheet选择，垂直/水平合并</p>
+  </div>
+  <div class="card" style="cursor:pointer" onclick="location.href='/table-match'">
+    <h3>🔗 表头匹配</h3>
+    <p style="font-size:13px;color:var(--sub)">XLOOKUP 可视化，精确/模糊匹配</p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}{% endblock %}

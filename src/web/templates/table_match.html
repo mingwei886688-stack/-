@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}表头匹配{% endblock %}
+{% block content %}
+<h1>🔗 表头匹配</h1>
+<p class="subtitle">可视化 XLOOKUP — 告诉工具哪两列是同一个意思，勾选要抄过来的数据</p>
+
+<div class="two-col">
+  <div class="card">
+    <h3>📋 我的表格（要补充数据的表）</h3>
+    <input type="file" id="sourceFile" accept=".xlsx,.xls,.csv" style="display:none">
+    <button class="btn" onclick="document.getElementById('sourceFile').click()">📂 选择文件</button>
+    <span id="sourceFileLabel" class="status"></span>
+    <select id="sourceSheet" class="hidden" onchange="loadSheet('source')"></select>
+    <div id="sourceHeaders" class="check-list" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h3>📋 参考数据（要从中抄数据的表）</h3>
+    <input type="file" id="lookupFile" accept=".xlsx,.xls,.csv" style="display:none">
+    <button class="btn" onclick="document.getElementById('lookupFile').click()">📂 选择文件</button>
+    <span id="lookupFileLabel" class="status"></span>
+    <select id="lookupSheet" class="hidden" onchange="loadSheet('lookup')"></select>
+    <div id="lookupHeaders" class="check-list" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>🔗 匹配规则</h3>
+  <p style="font-size:12px;color:var(--sub);margin-bottom:12px">把「我的表格」的哪一列，对应到「参考数据」的哪一列</p>
+  <div id="matchPairs"></div>
+  <button class="btn btn-sm" onclick="addPair()" style="margin-top:8px">➕ 添加对应关系</button>
+
+  <div style="margin-top:16px">
+    <label style="font-weight:600;font-size:13px">要抄过来的列（勾选）：</label>
+    <select id="matchMode" style="margin-left:16px">
+      <option value="精确匹配">精确匹配</option>
+      <option value="模糊匹配">模糊匹配</option>
+    </select>
+  </div>
+  <div id="pullColumns" class="check-list" style="margin-top:8px"></div>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" id="previewBtn" disabled onclick="doExecute()">👁 预览匹配</button>
+  <button class="btn btn-primary" id="exportBtn" disabled onclick="doExport()">📤 导出结果</button>
+</div>
+
+<div class="card hidden" id="previewCard" style="margin-top:16px">
+  <h3>匹配结果 <span id="matchInfo" style="font-weight:400;font-size:12px;color:var(--sub)"></span></h3>
+  <div class="table-wrap"><table class="data-table" id="previewTable"></table></div>
+</div>
+
+<div id="status" class="status"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let sourceData = { filename:'', sheets:[], key:'', headers:[] };
+let lookupData = { filename:'', sheets:[], key:'', headers:[] };
+let pairCount = 0;
+
+// 文件上传
+document.getElementById('sourceFile').addEventListener('change', e => uploadFile('source', e.target.files[0]));
+document.getElementById('lookupFile').addEventListener('change', e => uploadFile('lookup', e.target.files[0]));
+
+async function uploadFile(role, f) {
+  if (!f) return;
+  const endpoint = role==='source' ? '/api/table/match/upload-source' : '/api/table/match/upload-lookup';
+  const form = new FormData(); form.append('file', f);
+  const r = await fetch(endpoint, {method:'POST',body:form});
+  const d = await r.json();
+  if (d.ok) {
+    if (role==='source') {
+      sourceData.filename = d.filename; sourceData.sheets = d.sheets;
+      document.getElementById('sourceFileLabel').textContent = `✅ ${d.filename}`;
+      const sel = document.getElementById('sourceSheet');
+      sel.innerHTML = d.sheets.map(s => `<option>${s}</option>`).join('');
+      sel.classList.remove('hidden');
+      if (d.sheets.length===1) loadSheet('source');
+    } else {
+      lookupData.filename = d.filename; lookupData.sheets = d.sheets;
+      document.getElementById('lookupFileLabel').textContent = `✅ ${d.filename}`;
+      const sel = document.getElementById('lookupSheet');
+      sel.innerHTML = d.sheets.map(s => `<option>${s}</option>`).join('');
+      sel.classList.remove('hidden');
+      if (d.sheets.length===1) loadSheet('lookup');
+    }
+  }
+}
+
+async function loadSheet(role) {
+  const data = role==='source' ? sourceData : lookupData;
+  const sheet = document.getElementById(role+'Sheet').value;
+  const r = await fetch('/api/table/match/load-sheet', {
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({filename:data.filename, sheet, role})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    if (role==='source') { sourceData.key = d.key; sourceData.headers = d.headers; }
+    else { lookupData.key = d.key; lookupData.headers = d.headers; }
+    renderHeaders(role, d.headers);
+    updateMatchUI();
+  }
+}
+
+function renderHeaders(role, headers) {
+  const el = document.getElementById(role+'Headers');
+  el.innerHTML = headers.map(h => `<label><input type="checkbox" value="${h}"> ${h}</label>`).join('');
+  if (role==='lookup') {
+    document.getElementById('pullColumns').innerHTML = headers.map(h => `<label><input type="checkbox" value="${h}" class="pull-col"> ${h}</label>`).join('');
+  }
+  updatePairs();
+}
+
+function updateMatchUI() {
+  const ready = sourceData.key && lookupData.key;
+  document.getElementById('previewBtn').disabled = !ready;
+}
+
+function updatePairs() {
+  document.querySelectorAll('.match-pair select.source-col').forEach(sel => {
+    const cur = sel.value;
+    sel.innerHTML = sourceData.headers.map(h => `<option>${h}</option>`).join('');
+    if (sourceData.headers.includes(cur)) sel.value = cur;
+  });
+  document.querySelectorAll('.match-pair select.lookup-col').forEach(sel => {
+    const cur = sel.value;
+    sel.innerHTML = lookupData.headers.map(h => `<option>${h}</option>`).join('');
+    if (lookupData.headers.includes(cur)) sel.value = cur;
+  });
+}
+
+function addPair() {
+  pairCount++;
+  const div = document.createElement('div');
+  div.className = 'match-pair';
+  div.id = 'pair-'+pairCount;
+  div.innerHTML = `
+    把 <select class="source-col">${sourceData.headers.map(h=>`<option>${h}</option>`).join('')}</select>
+    对应到 <select class="lookup-col">${lookupData.headers.map(h=>`<option>${h}</option>`).join('')}</select> 这一列
+    <button class="btn btn-sm" onclick="this.parentElement.remove()">✕</button>
+  `;
+  document.getElementById('matchPairs').appendChild(div);
+}
+
+async function doExecute() {
+  const pairs = [...document.querySelectorAll('.match-pair')].map(el => [
+    el.querySelector('.source-col').value,
+    el.querySelector('.lookup-col').value
+  ]);
+  const pulls = [...document.querySelectorAll('.pull-col:checked')].map(c => c.value);
+  if (!pairs.length) return alert('请至少添加一条对应关系');
+  if (!pulls.length) return alert('请至少勾选一列要抄的数据');
+
+  const r = await fetch('/api/table/match/execute', {
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      source_key: sourceData.key, lookup_key: lookupData.key,
+      match_pairs: pairs, pull_columns: pulls,
+      match_mode: document.getElementById('matchMode').value
+    })
+  });
+  const d = await r.json();
+  if (d.ok) {
+    renderPreview(d.preview);
+    document.getElementById('exportBtn').disabled = false;
+  } else {
+    document.getElementById('status').textContent = '❌ ' + d.error;
+  }
+}
+
+function renderPreview(p) {
+  document.getElementById('previewCard').classList.remove('hidden');
+  document.getElementById('matchInfo').textContent = `(共 ${p.total_rows} 行，${p.unmatched} 行未匹配)`;
+  const t = document.getElementById('previewTable');
+  t.innerHTML = '<thead><tr>' + p.columns.map(c => `<th>${c}</th>`).join('') + '</tr></thead>'
+    + '<tbody>' + p.rows.map(r => '<tr>' + r.map(v => `<td>${v}</td>`).join('') + '</tr>').join('') + '</tbody>';
+}
+
+async function doExport() {
+  const r = await fetch('/api/table/match/export', {
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({format:'xlsx'})
+  });
+  if (r.ok) {
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = '匹配结果.xlsx'; a.click(); URL.revokeObjectURL(url);
+  }
+}
+</script>
+{% endblock %}

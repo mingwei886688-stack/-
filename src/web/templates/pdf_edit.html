@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}PDF 编辑{% endblock %}
+{% block content %}
+<h1>✏️ PDF 编辑</h1>
+<p class="subtitle">预览缩略图，删除/旋转/提取页面，添加文字批注或遮盖</p>
+
+<div id="uploadSection" class="card">
+  <h3>选择 PDF 文件</h3>
+  <input type="file" id="editFileInput" accept=".pdf" style="display:none">
+  <div id="editDropzone" class="dropzone" style="padding:24px">
+    <div class="label">拖拽 PDF 文件或点击选择</div>
+  </div>
+  <div id="fileName" class="status" style="margin-top:8px"></div>
+</div>
+
+<div id="editWorkspace" class="hidden">
+  <div class="toolbar">
+    <button class="btn btn-sm" onclick="toggleSelectAll()">☑ 全选/取消</button>
+    <span class="sep"></span>
+    <button class="btn btn-sm" onclick="doDelete()">🗑 删除选中页</button>
+    <button class="btn btn-sm" onclick="doRotate()">↻ 旋转选中页 90°</button>
+    <button class="btn btn-sm" onclick="doExtract()">📋 提取选中页</button>
+    <span class="sep"></span>
+    <button class="btn btn-sm" onclick="showTextModal('add')">✏️ 添加文字</button>
+    <button class="btn btn-sm" onclick="showTextModal('redact')">⬛ 遮盖区域</button>
+    <span class="sep"></span>
+    <button class="btn btn-primary btn-sm" onclick="doSave()">💾 保存下载</button>
+  </div>
+
+  <div id="thumbGrid" class="thumb-grid"></div>
+  <div id="editStatus" class="status"></div>
+</div>
+
+<!-- 文字编辑弹窗 -->
+<div id="textModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="modalTitle">添加文字</h3>
+    <div class="field"><label>页码</label><input type="number" id="modalPage" min="1" value="1"></div>
+    <div class="field"><label>X 坐标</label><input type="number" id="modalX" step="0.1" value="100"></div>
+    <div class="field"><label>Y 坐标</label><input type="number" id="modalY" step="0.1" value="100"></div>
+    <div id="textField" class="field"><label>文字内容</label><input type="text" id="modalText" value=""></div>
+    <div id="sizeField" class="field"><label>字号</label><input type="number" id="modalFontSize" value="14" min="6" max="72"></div>
+    <div id="whField" class="field hidden">
+      <label>宽度</label><input type="number" id="modalW" step="0.1" value="200">
+      <label>高度</label><input type="number" id="modalH" step="0.1" value="40">
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="modalConfirmBtn">确认</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let totalPages = 0;
+let selectedPages = new Set();
+let modalMode = 'add';
+
+// 上传
+const editDz = document.getElementById('editDropzone');
+const editFi = document.getElementById('editFileInput');
+editDz.addEventListener('click', () => editFi.click());
+editFi.addEventListener('change', () => uploadEdit(editFi.files[0]));
+editDz.addEventListener('dragover', e => { e.preventDefault(); editDz.classList.add('dragover'); });
+editDz.addEventListener('dragleave', () => editDz.classList.remove('dragover'));
+editDz.addEventListener('drop', e => { e.preventDefault(); editDz.classList.remove('dragover'); uploadEdit(e.dataTransfer.files[0]); });
+
+async function uploadEdit(f) {
+  if (!f) return;
+  const form = new FormData(); form.append('file', f);
+  document.getElementById('fileName').textContent = '⏳ 加载中...';
+  const r = await fetch('/api/pdf/edit/upload', {method:'POST',body:form});
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('fileName').textContent = `✅ ${f.name} — ${d.total_pages} 页`;
+    document.getElementById('uploadSection').classList.add('hidden');
+    document.getElementById('editWorkspace').classList.remove('hidden');
+    totalPages = d.total_pages;
+    loadThumbnails();
+  }
+}
+
+async function loadThumbnails() {
+  document.getElementById('editStatus').textContent = '⏳ 加载缩略图...';
+  const r = await fetch('/api/pdf/edit/thumbnails');
+  const d = await r.json();
+  const grid = document.getElementById('thumbGrid');
+  grid.innerHTML = d.pages.map(p => `
+    <div class="thumb-item" data-page="${p.page}" onclick="togglePage(${p.page}, this)">
+      <img src="${p.data}" alt="第${p.page}页">
+      <div class="page-num">第 ${p.page} 页</div>
+    </div>
+  `).join('');
+  document.getElementById('editStatus').textContent = `共 ${d.total} 页 · 点击选择页面`;
+}
+
+function togglePage(p, el) {
+  if (selectedPages.has(p)) { selectedPages.delete(p); el.classList.remove('selected'); }
+  else { selectedPages.add(p); el.classList.add('selected'); }
+  document.getElementById('editStatus').textContent = `已选 ${selectedPages.size} 页`;
+}
+
+function toggleSelectAll() {
+  if (selectedPages.size === totalPages) { selectedPages.clear(); }
+  else { for (let i=1;i<=totalPages;i++) selectedPages.add(i); }
+  document.querySelectorAll('.thumb-item').forEach(el => {
+    const p = parseInt(el.dataset.page);
+    if (selectedPages.has(p)) el.classList.add('selected'); else el.classList.remove('selected');
+  });
+  document.getElementById('editStatus').textContent = `已选 ${selectedPages.size} 页`;
+}
+
+function getSelected() { return [...selectedPages].sort((a,b)=>a-b); }
+
+async function doDelete() {
+  if (!selectedPages.size) return alert('请先选择页面');
+  await fetch('/api/pdf/edit/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pages:getSelected()})});
+  selectedPages.clear(); loadThumbnails();
+}
+
+async function doRotate() {
+  if (!selectedPages.size) return alert('请先选择页面');
+  await fetch('/api/pdf/edit/rotate', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pages:getSelected(),angle:90})});
+  loadThumbnails();
+}
+
+function doExtract() {
+  if (!selectedPages.size) return alert('请先选择页面');
+  fetch('/api/pdf/edit/extract', {method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pages:getSelected()})})
+    .then(r => r.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = '提取的页面.pdf'; a.click(); URL.revokeObjectURL(url);
+    });
+}
+
+function doSave() {
+  fetch('/api/pdf/edit/save', {method:'POST'}).then(r => r.blob()).then(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = '编辑后的文档.pdf'; a.click(); URL.revokeObjectURL(url);
+  });
+}
+
+function showTextModal(mode) {
+  if (!selectedPages.size) return alert('请先选择一个页面');
+  modalMode = mode;
+  document.getElementById('modalTitle').textContent = mode==='add'?'添加文字':'遮盖区域';
+  document.getElementById('textField').classList.toggle('hidden', mode!=='add');
+  document.getElementById('sizeField').classList.toggle('hidden', mode!=='add');
+  document.getElementById('whField').classList.toggle('hidden', mode==='add');
+  document.getElementById('modalPage').value = getSelected()[0];
+  document.getElementById('textModal').classList.remove('hidden');
+}
+document.getElementById('modalConfirmBtn').addEventListener('click', async () => {
+  const p = parseInt(document.getElementById('modalPage').value);
+  if (modalMode==='add') {
+    await fetch('/api/pdf/edit/add-text', {method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({page:p, x:parseFloat(document.getElementById('modalX').value),
+        y:parseFloat(document.getElementById('modalY').value),
+        text:document.getElementById('modalText').value,
+        font_size:parseInt(document.getElementById('modalFontSize').value)})});
+  } else {
+    await fetch('/api/pdf/edit/redact', {method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({page:p, x:parseFloat(document.getElementById('modalX').value),
+        y:parseFloat(document.getElementById('modalY').value),
+        width:parseFloat(document.getElementById('modalW').value),
+        height:parseFloat(document.getElementById('modalH').value)})});
+  }
+  closeModal();
+  document.getElementById('editStatus').textContent = '✅ 已标记，保存后生效';
+});
+function closeModal() { document.getElementById('textModal').classList.add('hidden'); }
+</script>
+{% endblock %}

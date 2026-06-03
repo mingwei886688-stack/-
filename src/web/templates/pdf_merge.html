@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}PDF 合并{% endblock %}
+{% block content %}
+<h1>📄 PDF 合并</h1>
+<p class="subtitle">拖拽 PDF 文件，排序后一键合并</p>
+
+<div id="dropzone" class="dropzone">
+  <div class="icon">📂</div>
+  <div class="label">拖拽 PDF 文件到此处</div>
+  <div class="hint">或点击选择文件（支持多选）</div>
+</div>
+<input type="file" id="fileInput" accept=".pdf" multiple style="display:none">
+
+<div class="card">
+  <h3>已导入文件（<span id="fileCount">0</span>）</h3>
+  <ul class="item-list" id="fileList"></ul>
+  <div class="toolbar" style="margin-top:12px">
+    <button class="btn btn-danger btn-sm" onclick="removeSelected()">🗑 移除选中</button>
+    <button class="btn btn-sm" onclick="clearAll()">✕ 清空</button>
+    <span class="sep"></span>
+    <span id="pageInfo" class="status">总页数: 0</span>
+  </div>
+</div>
+
+<div style="text-align:right">
+  <button class="btn btn-primary" id="mergeBtn" disabled onclick="doMerge()">📤 合并下载</button>
+</div>
+<div id="status" class="status"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let files = [];
+
+const dz = document.getElementById('dropzone');
+const fi = document.getElementById('fileInput');
+const fl = document.getElementById('fileList');
+const st = document.getElementById('status');
+
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', () => upload(fi.files));
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); upload(e.dataTransfer.files); });
+
+async function upload(fileList) {
+  const form = new FormData();
+  for (let f of fileList) if (f.name.endsWith('.pdf')) form.append('files', f);
+  if (!form.has('files')) return;
+  st.textContent = '上传中...';
+  const r = await fetch('/api/pdf/merge/upload', {method:'POST',body:form});
+  const d = await r.json();
+  st.textContent = `✅ 已添加 ${d.added} 个文件`;
+  refreshList();
+}
+
+async function refreshList() {
+  const r = await fetch('/api/pdf/merge/files');
+  const d = await r.json();
+  files = d.files;
+  fl.innerHTML = files.map((f,i) => `
+    <li><input type="checkbox" data-index="${i}"> ${f.name} — <span style="color:var(--sub)">${f.pages} 页</span></li>
+  `).join('');
+  document.getElementById('fileCount').textContent = files.length;
+  document.getElementById('pageInfo').textContent = `总页数: ${files.reduce((s,f)=>s+f.pages,0)}`;
+  document.getElementById('mergeBtn').disabled = files.length === 0;
+}
+
+function removeSelected() {
+  const checks = fl.querySelectorAll('input:checked');
+  const indices = [...checks].map(c => parseInt(c.dataset.index)).sort((a,b)=>b-a);
+  Promise.all(indices.map(i => fetch(`/api/pdf/merge/remove/${i}`, {method:'DELETE'}))).then(refreshList);
+}
+
+function clearAll() {
+  // 从后往前删
+  [...files].reverse().forEach((_,i) => fetch(`/api/pdf/merge/remove/${files.length-1-i}`, {method:'DELETE'}));
+  setTimeout(refreshList, 300);
+}
+
+function doMerge() {
+  st.textContent = '合并中...';
+  window.location.href = '/api/pdf/merge/execute';
+  setTimeout(() => st.textContent = '✅ 下载已开始', 1000);
+}
+
+refreshList();
+</script>
+{% endblock %}

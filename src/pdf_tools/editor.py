@@ -33,6 +33,18 @@ class PDFEditor:
     def file_name(self) -> str:
         return os.path.basename(self._file_path)
 
+    def render_page(self, page_num: int, scale: float = 0.3) -> "Image":
+        """渲染指定页面为缩略图（用于 Web 展示）"""
+        import pypdfium2 as pdfium
+        if not self._reader or page_num >= len(self._reader.pages):
+            raise ValueError("无效的页码")
+        pdf = pdfium.PdfDocument(self._file_path)
+        page = pdf[page_num]
+        bitmap = page.render(scale=scale)
+        img = bitmap.to_pil()
+        pdf.close()
+        return img
+
     def delete_pages(self, page_numbers: list[int]) -> int:
         """删除指定页面（0-based），返回剩余页数"""
         if not self._reader:

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文件大助 — {% block title %}{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/style.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="logo">📦 文件大助</div>
+  <a href="/" class="{% if request.path == '/' %}active{% endif %}">🏠 首页</a>
+  <a href="/pdf-merge" class="{% if request.path == '/pdf-merge' %}active{% endif %}">📄 PDF 合并</a>
+  <a href="/pdf-edit" class="{% if request.path == '/pdf-edit' %}active{% endif %}">✏️ PDF 编辑</a>
+  <a href="/table-merge" class="{% if request.path == '/table-merge' %}active{% endif %}">📊 表格合并</a>
+  <a href="/table-match" class="{% if request.path == '/table-match' %}active{% endif %}">🔗 表头匹配</a>
+</nav>
+
+<div class="main">
+{% block content %}{% endblock %}
+</div>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>
