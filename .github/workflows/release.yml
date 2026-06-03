@@ -1,0 +1,117 @@
+name: 构建发布
+
+on:
+  push:
+    tags:
+      - 'v*'           # 推送 v1.0.0 这类标签时触发
+  workflow_dispatch:     # 也支持手动触发
+
+jobs:
+  # ─── macOS 构建 ───
+  build-macos:
+    runs-on: macos-15   # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller pypdfium2
+
+      - name: 构建
+        run: |
+          pyinstaller --onedir --windowed --name="文件大助" \
+            --collect-all pypdfium2 \
+            --hidden-import=common \
+            --hidden-import=core \
+            --hidden-import=pdf_tools \
+            --hidden-import=table_tools \
+            --hidden-import=pdf_tools.ui \
+            --hidden-import=table_tools.ui \
+            --hidden-import=common.widgets \
+            --hidden-import=common.styles \
+            --hidden-import=common.models \
+            src/main.py
+
+      - name: 打包为 zip
+        run: |
+          cd dist
+          zip -r "文件大助-macOS-arm64.zip" "文件大助.app"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 文件大助-macOS-arm64
+          path: dist/文件大助-macOS-arm64.zip
+
+  # ─── Windows 构建 ───
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller pypdfium2
+
+      - name: 构建
+        run: |
+          pyinstaller --onedir --windowed --name="文件大助" `
+            --collect-all pypdfium2 `
+            --hidden-import=common `
+            --hidden-import=core `
+            --hidden-import=pdf_tools `
+            --hidden-import=table_tools `
+            --hidden-import=pdf_tools.ui `
+            --hidden-import=table_tools.ui `
+            --hidden-import=common.widgets `
+            --hidden-import=common.styles `
+            --hidden-import=common.models `
+            src/main.py
+
+      - name: 打包为 zip
+        run: |
+          Compress-Archive -Path dist\文件大助\* -DestinationPath dist\文件大助-Windows-x64.zip
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 文件大助-Windows-x64
+          path: dist/文件大助-Windows-x64.zip
+
+  # ─── 创建 Release ───
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载 macOS 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: 文件大助-macOS-arm64
+
+      - name: 下载 Windows 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: 文件大助-Windows-x64
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "文件大助 ${{ github.ref_name }}"
+          files: |
+            文件大助-macOS-arm64.zip
+            文件大助-Windows-x64.zip
+          generate_release_notes: true
